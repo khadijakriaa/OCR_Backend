@@ -1,0 +1,12 @@
+### Login
+POST http://localhost:8080/login
+Content-Type: application/json
+
+{
+  "email": "your@email.com",
+  "password": "yourPassword"
+}
+
+### GET /me (replace token)
+GET http://localhost:8080/me
+Authorization: Bearer your.jwt.token.here
