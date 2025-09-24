@@ -1,4 +1,6 @@
 package com.msi.springsecExample.Repository;
 
-public class FileTextRepository {
-}
+import com.msi.springsecExample.entity.FileText;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface FileTextRepository extends JpaRepository<FileText, Long> {}

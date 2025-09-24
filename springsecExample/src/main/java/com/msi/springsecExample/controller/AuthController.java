@@ -1,4 +1,4 @@
-package com.msi.springsecExample.controller;
+package com.msi.springsecExample.Controller;
 
 import com.msi.springsecExample.auth.CustomUserDetailsService;
 import com.msi.springsecExample.dto.LoginRequest;
@@ -12,10 +12,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.Optional;
+@CrossOrigin(origins = "http://localhost:4200", allowCredentials = "true")
 
 @RestController
 @RequestMapping("/auth")
@@ -39,15 +42,18 @@ public class AuthController {
         }
 
         User user = userOpt.get();
+
         String token = jwtUtil.generateToken(user.getId());
 
         Cookie cookie = new Cookie("jwt", token);
+        cookie.setSecure(false);               // Set to true in production (requires HTTPS)
+
         cookie.setHttpOnly(true);
         cookie.setPath("/");
         cookie.setMaxAge((int) (jwtUtil.getJwtExpirationMs() / 1000));
 
         response.addCookie(cookie);
-        return ResponseEntity.ok("Login successful");
+        return ResponseEntity.ok(Map.of("message","Login successful"));
     }
 
     @PostMapping("/logout")
@@ -63,27 +69,34 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody RegisterRequest request) {
         if (userRepository.findByEmail(request.getEmail()).isPresent()) {
-            return ResponseEntity.badRequest().body("Email is already taken");
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(Map.of("message", "Email is already taken"));
         }
 
         User user = new User();
         user.setEmail(request.getEmail());
         user.setFullName(request.getFullName());
-        user.setPassword(passwordEncoder.encode(request.getPassword())); // encode password!
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
 
         userRepository.save(user);
 
-        return ResponseEntity.ok("User registered successfully");
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(Map.of("message", "User registered successfully"));
     }
+
     @GetMapping("/me")
     public ResponseEntity<?> getCurrentUser(Authentication authentication) {
         if (authentication == null || !authentication.isAuthenticated()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Unauthorized");
         }
 
-        CustomUserDetailsService userDetails = (CustomUserDetailsService) authentication.getPrincipal();
+        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        return ResponseEntity.ok(Map.of(
+                "username", userDetails.getUsername(),
+                "authorities", userDetails.getAuthorities()
+        ));
 
-        return ResponseEntity.ok(userDetails);
-    }
-}
+    }}
 
