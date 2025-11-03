@@ -7,11 +7,15 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 
 @Service
 public class TextExtractionService {
@@ -20,21 +24,31 @@ public class TextExtractionService {
     private static final String ERROR_NULL_FILE = "Input file cannot be null";
     private static final String ERROR_EMPTY_FILE = "Input file is empty";
 
-    public String extractTextFromFile(MultipartFile file) throws IOException, TesseractException {
-        String filename = file.getOriginalFilename();
+    @Value("${tesseract.datapath:C:/Program Files/Tesseract-OCR}")
+    private String tessDataPath;
 
-        if (filename == null) {
+    public String extractTextFromFile(MultipartFile file) throws IOException, TesseractException {
+        if (file == null) {
+            throw new IllegalArgumentException(ERROR_NULL_FILE);
+        }
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException(ERROR_EMPTY_FILE);
+        }
+
+        String filename = file.getOriginalFilename();
+        if (filename == null || filename.isBlank()) {
             throw new IllegalArgumentException("Invalid file name");
         }
 
         logger.info("Extracting text from file: {}", filename);
 
-        if (filename.endsWith(".pdf")) {
+        String lower = filename.toLowerCase();
+        if (lower.endsWith(".pdf")) {
             return extractTextFromPDF(file);
-        } else if (filename.endsWith(".png") || filename.endsWith(".jpg") || filename.endsWith(".jpeg")) {
+        } else if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
             return extractTextFromImage(file);
         } else {
-            throw new IllegalArgumentException("Unsupfported file type: " + filename);
+            throw new IllegalArgumentException("Unsupported file type: " + filename);
         }
     }
 
@@ -45,6 +59,7 @@ public class TextExtractionService {
         }
     }
 
+    // In the extractTextFromImage method, add French language support:
     private String extractTextFromImage(MultipartFile file) throws IOException, TesseractException {
         String originalFilename = file.getOriginalFilename();
         String extension = "";
@@ -54,22 +69,30 @@ public class TextExtractionService {
         } else {
             throw new IOException("Could not determine file extension.");
         }
+
         File tempFile = File.createTempFile("upload-", extension);
 
         try {
-            file.transferTo(tempFile);
-            System.out.println("1");
-            Tesseract tesseract = new Tesseract();
-            // NOTE: Use the parent folder of tessdata, NOT tessdata itself
-            tesseract.setDatapath("C:/Program Files/Tesseract-OCR/tessdata");
-            tesseract.setLanguage("eng");
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
 
-            System.out.println("2");
+            Tesseract tesseract = new Tesseract();
+            tesseract.setDatapath(tessDataPath);
+            // Add French language for better payslip recognition
+            tesseract.setLanguage("eng+fra");
+            tesseract.setPageSegMode(6); // Uniform block of text
+            tesseract.setOcrEngineMode(1);
+
+            // Improve image processing for documents
             tesseract.setTessVariable("user_defined_dpi", "300");
-            System.out.println("3");
+            tesseract.setTessVariable("preserve_interword_spaces", "1");
+
             logger.info("Performing OCR on image file: {}", tempFile.getAbsolutePath());
-            System.out.println("4");
-            return tesseract.doOCR(tempFile);
+            String result = tesseract.doOCR(tempFile);
+            logger.info("OCR completed successfully");
+            return result;
+
         } catch (TesseractException e) {
             logger.error("OCR failed: {}", e.getMessage(), e);
             throw e;

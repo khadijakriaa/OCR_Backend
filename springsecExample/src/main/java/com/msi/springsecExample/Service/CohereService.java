@@ -1,112 +1,123 @@
 package com.msi.springsecExample.Service;
 
-import com.msi.springsecExample.Cohere.CohereChatRequest;
 import com.msi.springsecExample.Cohere.CohereChatResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpClientErrorException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
 @Service
 public class CohereService {
-
     @Value("${cohere.api.key}")
     private String cohereApiKey;
 
-    // CORRECTED API ENDPOINT
-    private static final String COHERE_API_URL = "https://api.cohere.ai/v1/chat";
+    @Value("${cohere.model:command-a-03-2025}")
+    private String cohereModel;
 
-    public String sendToCohere(String extractedText) {
-        if (extractedText == null || extractedText.trim().isEmpty()) {
-            return "Texte vide : rien à envoyer à Cohere.";
-        }
+    @Value("${cohere.api.url:https://api.cohere.ai/v1/chat}")
+    private String cohereChatUrl;
 
-        // SPLIT YOUR OLD PROMPT INTO TWO PARTS:
-        // 1. The SYSTEM PROMPT (preamble) - The instructions
-        String systemInstructions = """
-            Tu es un assistant intelligent qui lit une fiche de paie française.
-            Ta tâche est d'extraire les informations importantes et de répondre uniquement avec un objet JSON, sans aucun texte supplémentaire.
-            Utilise exactement ce format :
+    @Value("${cohere.api.version:2024-11-15}")
+    private String cohereApiVersion;
 
-            {
-              "nom_employe": "string",
-              "adresse_employeur": "string",
-              "Emploi": "string",
-              "date_paie": "string",
-              "salaire_brut": "string",
-              "salaire_net": "string",
-              "impots": [
-                {
-                  "type": "string",
-                  "montant": "string"
-                }
-              ],
-              "deductions": [
-                {
-                  "type": "string",
-                  "montant": "string"
-                }
-              ],
-              "heures_travaillees": "string",
-              "taux_horaire": "string"
-            }
+    private final RestTemplate restTemplate = new RestTemplate();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-            Si une information est absente ou illisible, utilise "non spécifié" ou null.
-            """;
+    // Extract structured payslip JSON
+    public String extractPayslipData(String ocrText) {
+        String prompt = "Tu es un assistant intelligent qui lit une fiche de paie française. "
+                + "Extrait uniquement les informations importantes sous forme d'objet JSON avec les champs: "
+                + "name, role, age, salary, impots (array), deductions (array). "
+                + "Ne renvoie rien d'autre que le JSON valide.\n\nTexte: " + ocrText;
 
-        // 2. The USER MESSAGE (message) - The data to process
-        String userMessage = "Voici le texte brut de la fiche de paie :\n" + extractedText;
+        return sendChatRequest(prompt);
+    }
 
-        // Create the new request object with both parts
-        CohereChatRequest request = new CohereChatRequest(systemInstructions, userMessage);
-        // You can still set model and other parameters if needed
-        request.setModel("command-r-plus");
-        request.setMaxTokens(1500);
-        request.setTemperature(0);
+    // Summarize text
+    public String summarizeText(String text) {
+        String prompt = "Fais un résumé concis du texte suivant en français, sous forme de texte simple :\n\n" + text;
+        return sendChatRequest(prompt);
+    }
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(cohereApiKey);
-
-        HttpEntity<CohereChatRequest> entity = new HttpEntity<>(request, headers);
-
-        RestTemplate restTemplate = new RestTemplate();
-
+    // Core chat request - FIXED JSON formatting
+    private String sendChatRequest(String messageContent) {
         try {
-            // Send the request to the NEW /chat endpoint
-            ResponseEntity<CohereChatResponse> response = restTemplate.exchange(
-                    COHERE_API_URL, // NOW USING THE CHAT URL
+            // Create proper JSON structure using ObjectMapper to avoid syntax errors
+            CohereRequest request = new CohereRequest();
+            request.setModel(cohereModel);
+            request.setMessage(messageContent);
+            request.setMaxTokens(1500);
+            request.setTemperature(0.0);
+            request.setPreamble("You are a helpful assistant that responds in French.");
+
+            String requestBody = objectMapper.writeValueAsString(request);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(java.util.List.of(MediaType.APPLICATION_JSON));
+            headers.set("Authorization", "Bearer " + cohereApiKey);
+            headers.set("Cohere-Version", cohereApiVersion);
+
+            HttpEntity<String> entity = new HttpEntity<>(requestBody, headers);
+
+            // First, get the raw response as String to see what we're getting
+            ResponseEntity<String> rawResponse = restTemplate.exchange(
+                    cohereChatUrl,
                     HttpMethod.POST,
                     entity,
-                    CohereChatResponse.class // Expecting the new response type
+                    String.class
             );
 
-            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                String rawResponse = response.getBody().getResponseText();
-                System.out.println("Raw response from Cohere: " + rawResponse);
+            System.out.println("Cohere API Response: " + rawResponse.getBody());
 
-                // The new API is better at following instructions, but we still clean it.
-                return extractJsonFromText(rawResponse);
+            if (rawResponse.getStatusCode().is2xxSuccessful() && rawResponse.getBody() != null) {
+                try {
+                    CohereChatResponse response = objectMapper.readValue(rawResponse.getBody(), CohereChatResponse.class);
+                    String result = response.getResponseText();
+                    return result != null ? result.trim() : "No response text received";
+                } catch (Exception e) {
+                    // If parsing fails, return the raw response
+                    return "Raw response: " + rawResponse.getBody();
+                }
             } else {
-                return "Erreur : réponse invalide de Cohere. Statut: " + response.getStatusCode();
+                return "Erreur : réponse invalide de Cohere. Statut: " + rawResponse.getStatusCode() + " - Body: " + rawResponse.getBody();
             }
+
+        } catch (HttpClientErrorException e) {
+            String errorDetails = e.getResponseBodyAsString();
+            System.err.println("Cohere API Error: " + errorDetails);
+            throw new RuntimeException("Cohere API call failed: " + e.getStatusCode() + " - " + errorDetails);
         } catch (Exception e) {
-            e.printStackTrace();
-            return "Erreur lors de l'appel à l'API Cohere: " + e.getMessage();
+            System.err.println("General Error: " + e.getMessage());
+            throw new RuntimeException("Error calling Cohere API: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Extracts JSON substring from a text by finding the first '{' and last '}'.
-     * If no JSON found, returns original text.
-     * (This method can remain the same)
-     */
-    private String extractJsonFromText(String text) {
-        int start = text.indexOf("{");
-        int end = text.lastIndexOf("}");
-        if (start != -1 && end != -1 && end > start) {
-            return text.substring(start, end + 1).trim();
-        }
-        return text;
+    // Inner class for proper JSON serialization
+    public static class CohereRequest {
+        private String model;
+        private String message;
+        private int maxTokens;
+        private double temperature;
+        private String preamble;
+
+        // Getters and setters
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
+
+        public String getMessage() { return message; }
+        public void setMessage(String message) { this.message = message; }
+
+        public int getMaxTokens() { return maxTokens; }
+        public void setMaxTokens(int maxTokens) { this.maxTokens = maxTokens; }
+
+        public double getTemperature() { return temperature; }
+        public void setTemperature(double temperature) { this.temperature = temperature; }
+
+        public String getPreamble() { return preamble; }
+        public void setPreamble(String preamble) { this.preamble = preamble; }
     }
 }

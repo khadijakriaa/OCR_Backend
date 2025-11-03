@@ -38,9 +38,10 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
+                .cors(cors -> {}) // enable CORS support
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/api/files/upload",
+                                "/api/files/**",
                                 "/auth/me",
                                 "/auth/register",
                                 "/auth/login",

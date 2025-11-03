@@ -2,7 +2,6 @@ package com.msi.springsecExample.utils;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
-import lombok.Data;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -10,7 +9,6 @@ import java.security.Key;
 import java.util.Date;
 import java.util.UUID;
 
-@Data
 @Component
 public class JwtUtil {
 
@@ -31,6 +29,10 @@ public class JwtUtil {
                 .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)
                 .compact();
+    }
+
+    public long getJwtExpirationMs() {
+        return jwtExpirationMs;
     }
 
     public UUID getUserIdFromToken(String token) {
@@ -54,5 +56,19 @@ public class JwtUtil {
             return false;
         }
     }
+
+    public boolean validateToken(String jwt) {
+        return isTokenValid(jwt);
+    }
+
+    public String extractUsername(String jwt) {
+        return Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(jwt)
+                .getBody()
+                .getSubject();
+    }
+
 }
 

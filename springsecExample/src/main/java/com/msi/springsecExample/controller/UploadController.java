@@ -1,4 +1,4 @@
-package com.msi.springsecExample.Controller;
+package com.msi.springsecExample.controller;
 
 import com.msi.springsecExample.Service.TextExtractionService;
 import com.msi.springsecExample.Service.CohereService;
@@ -14,9 +14,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.HashMap;
-import java.util.Map;
-
 @RestController
 @RequestMapping("/api/files")
 @CrossOrigin(origins = "http://localhost:4200")
@@ -29,29 +26,38 @@ public class UploadController {
     private FileTextRepository fileTextRepository;
 
     @Autowired
-    private CohereService cohereService; // 👈 Inject the Cohere service
+    private CohereService cohereService;
 
     @PostMapping("/upload")
-    public ResponseEntity<?> handleFileUpload(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> handleFileUpload(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "mode", defaultValue = "structured") String mode) {
+
         try {
-            // Step 1: OCR extraction
+            // Step 1: Extract text
             String extractedText = textExtractionService.extractTextFromFile(file);
 
-            // Step 2: Send to Cohere
-            String cohereResult = cohereService.sendToCohere(extractedText);
+            // Step 2: Send to Cohere depending on mode
+            String cohereResult;
+            if ("summary".equalsIgnoreCase(mode)) {
+                cohereResult = cohereService.summarizeText(extractedText);
+            } else {
+                cohereResult = cohereService.extractPayslipData(extractedText);
+            }
 
-            // Step 3: Save extracted text to DB (if you want to also store Cohere result, update the entity)
+            // Step 3: Save original file & extracted text
             FileText fileText = new FileText();
             fileText.setFilename(file.getOriginalFilename());
             fileText.setContent(extractedText);
+            fileText.setFileData(file.getBytes());
             fileTextRepository.save(fileText);
 
-            // Step 4: Return response containing both extracted and analyzed text
+            // Step 4: Prepare response
             PayslipResponse response = new PayslipResponse();
             response.setExtractedText(extractedText);
             response.setCohereResult(cohereResult);
-            return ResponseEntity.ok(response);
 
+            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -65,5 +71,3 @@ public class UploadController {
         return ResponseEntity.ok(fileTextRepository.findAll());
     }
 }
-
-
